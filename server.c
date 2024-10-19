@@ -3,13 +3,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#define _WIN32_WINNT 0x0501  // Targeting Windows XP or later
+
 #include <windows.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <process.h>    // For _beginthreadex
 #include <tchar.h>      // For _TCHAR support
+#include <wincrypt.h>   // For Cryptographic API
 
-#pragma comment(lib, "Ws2_32.lib")
+//#pragma comment(lib, "Ws2_32.lib")  // Not needed with MinGW
 
 #define PORT "8080"
 #define BUFFER_SIZE 1024
@@ -68,7 +72,7 @@ void send_file_list(SOCKET client_socket) {
 
     hFind = FindFirstFile(directory_search, &findFileData);
     if (hFind == INVALID_HANDLE_VALUE) {
-        printf("FindFirstFile failed (%d)\n", GetLastError());
+        printf("FindFirstFile failed (%lu)\n", GetLastError());
         return;
     }
 
@@ -140,7 +144,7 @@ void compute_file_md5(const char *filename, char *md5_str) {
     DWORD hashLen = 16;
     BYTE buffer[BUFFER_SIZE];
     DWORD bytesRead;
-    HANDLE hFile = CreateFile(filename, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    HANDLE hFile = CreateFileA(filename, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 
     if (hFile == INVALID_HANDLE_VALUE) {
         strcpy(md5_str, "");
@@ -163,8 +167,8 @@ void compute_file_md5(const char *filename, char *md5_str) {
     while (ReadFile(hFile, buffer, BUFFER_SIZE, &bytesRead, NULL) && bytesRead != 0) {
         if (!CryptHashData(hHash, buffer, bytesRead, 0)) {
             CloseHandle(hFile);
-            CryptReleaseContext(hProv, 0);
             CryptDestroyHash(hHash);
+            CryptReleaseContext(hProv, 0);
             strcpy(md5_str, "");
             return;
         }
@@ -174,6 +178,7 @@ void compute_file_md5(const char *filename, char *md5_str) {
         for (DWORD i = 0; i < hashLen; i++) {
             sprintf(&md5_str[i * 2], "%02x", hash[i]);
         }
+        md5_str[32] = '\0'; // Null-terminate the string
     } else {
         strcpy(md5_str, "");
     }
@@ -187,9 +192,8 @@ int main() {
     WSADATA wsaData;
     SOCKET server_socket, client_socket;
     struct addrinfo hints, *res;
-    int addrlen;
     HANDLE thread_handle;
-    DWORD thread_id;
+    unsigned int thread_id;
 
     // Initialize Winsock
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {

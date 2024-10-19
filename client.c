@@ -1,5 +1,7 @@
 // client.c - Windows Version
 
+#define _WIN32_WINNT 0x0501  // Targeting Windows XP or later
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -7,8 +9,9 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <tchar.h>      // For _TCHAR support
+#include <wincrypt.h>   // For Cryptographic API
 
-#pragma comment(lib, "Ws2_32.lib")
+//#pragma comment(lib, "Ws2_32.lib")  // Not needed with MinGW
 
 #define PORT "8080"
 #define BUFFER_SIZE 1024
@@ -117,9 +120,9 @@ void diff_files(SOCKET sock) {
     char md5_hash[33]; // 32 chars + null terminator
     char server_response[BUFFER_SIZE];
 
-    hFind = FindFirstFile("*.*", &findFileData);
+    hFind = FindFirstFileA("*.*", &findFileData);
     if (hFind == INVALID_HANDLE_VALUE) {
-        printf("FindFirstFile failed (%d)\n", GetLastError());
+        printf("FindFirstFile failed (%lu)\n", GetLastError());
         return;
     }
 
@@ -140,7 +143,7 @@ void diff_files(SOCKET sock) {
                 printf("File '%s' is the same on the server.\n", filename);
             }
         }
-    } while (FindNextFile(hFind, &findFileData) != 0);
+    } while (FindNextFileA(hFind, &findFileData) != 0);
 
     FindClose(hFind);
 }
@@ -191,7 +194,7 @@ void compute_file_md5(const char *filename, char *md5_str) {
     DWORD hashLen = 16;
     BYTE buffer[BUFFER_SIZE];
     DWORD bytesRead;
-    HANDLE hFile = CreateFile(filename, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    HANDLE hFile = CreateFileA(filename, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 
     if (hFile == INVALID_HANDLE_VALUE) {
         strcpy(md5_str, "");
@@ -214,8 +217,8 @@ void compute_file_md5(const char *filename, char *md5_str) {
     while (ReadFile(hFile, buffer, BUFFER_SIZE, &bytesRead, NULL) && bytesRead != 0) {
         if (!CryptHashData(hHash, buffer, bytesRead, 0)) {
             CloseHandle(hFile);
-            CryptReleaseContext(hProv, 0);
             CryptDestroyHash(hHash);
+            CryptReleaseContext(hProv, 0);
             strcpy(md5_str, "");
             return;
         }
