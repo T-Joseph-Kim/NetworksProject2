@@ -1,20 +1,19 @@
-# Makefile for UFmyMusic client and server on Windows
+# Makefile for UFmyMusic client and server
 
-# Compiler and flags
 CC = gcc
 CFLAGS = -Wall -g
-LDFLAGS = -lws2_32 -ladvapi32
+LDFLAGS = -lpthread -lssl -lcrypto
 
 # Targets
-all: server.exe client.exe
+all: server client
 
-server.exe: server.c
-	$(CC) $(CFLAGS) -o server.exe server.c $(LDFLAGS)
+server: server.c
+	$(CC) $(CFLAGS) -o server server.c $(LDFLAGS)
 
-client.exe: client.c
-	$(CC) $(CFLAGS) -o client.exe client.c $(LDFLAGS)
+client: client.c
+	$(CC) $(CFLAGS) -o client client.c $(LDFLAGS)
 
 clean:
-	del server.exe client.exe
+	rm -f server client
 
 .PHONY: all clean
