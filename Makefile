@@ -1,10 +1,7 @@
-# Makefile for UFmyMusic client and server
-
 CC = gcc
 CFLAGS = -Wall -g
-LDFLAGS = -lpthread -lssl -lcrypto
+LDFLAGS = -lssl -lcrypto -lpthread
 
-# Targets
 all: server client
 
 server: server.c

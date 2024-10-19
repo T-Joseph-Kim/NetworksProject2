@@ -1,20 +1,22 @@
+// client.c
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <pthread.h>
-#include <arpa/inet.h>
-#include <dirent.h>
-#include <sys/stat.h>
-#include <openssl/md5.h>
+#include <unistd.h>       // Provides access to POSIX operating system API
+#include <arpa/inet.h>    // Definitions for internet operations
+#include <dirent.h>       // Directory entry operations
+#include <sys/stat.h>     // Data returned by the `stat` function
+#include <openssl/md5.h>  // OpenSSL library for MD5 hashing
+#include <stdint.h>       // For fixed-size integer types
+#include "messages.h"     // Header file with message structs
 
 #define PORT 8080
-#define BUFFER_SIZE 1024
 
 // Function prototypes
 void list_files(int sock);
 void diff_files(int sock);
-void pull_files(int sock);
+void pull_files(int sock, const char *filename);
 void compute_file_md5(const char *filename, char *md5_str);
 
 int main() {
@@ -24,7 +26,7 @@ int main() {
 
     // Create socket
     if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-        printf("\nSocket creation error\n");
+        perror("Socket creation error");
         return -1;
     }
 
@@ -34,13 +36,13 @@ int main() {
 
     // Convert IPv4 address from text to binary
     if (inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr) <= 0) {
-        printf("\nInvalid address/ Address not supported\n");
+        perror("Invalid address/ Address not supported");
         return -1;
     }
 
     // Connect to server
     if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
-        printf("\nConnection Failed\n");
+        perror("Connection Failed");
         return -1;
     }
 
@@ -52,17 +54,37 @@ int main() {
         fgets(command, BUFFER_SIZE, stdin);
         command[strcspn(command, "\n")] = 0; // Remove newline
 
+        MessageHeader header;
+        memset(&header, 0, sizeof(header));
+
         if (strcasecmp(command, "LIST") == 0) {
-            write(sock, "LIST", strlen("LIST"));
+            header.type = htonl(MSG_LIST);
+            header.length = htonl(0);
+            send(sock, &header, sizeof(header), 0);
             list_files(sock);
         } else if (strcasecmp(command, "DIFF") == 0) {
-            write(sock, "DIFF", strlen("DIFF"));
+            header.type = htonl(MSG_DIFF);
+            header.length = htonl(0);
+            send(sock, &header, sizeof(header), 0);
             diff_files(sock);
         } else if (strcasecmp(command, "PULL") == 0) {
-            write(sock, "PULL", strlen("PULL"));
-            pull_files(sock);
+            printf("Enter the filename to pull: ");
+            fgets(command, BUFFER_SIZE, stdin);
+            command[strcspn(command, "\n")] = 0; // Remove newline
+
+            // Send PULL command header
+            header.type = htonl(MSG_PULL);
+            header.length = htonl(strlen(command) + 1); // Include null terminator
+            send(sock, &header, sizeof(header), 0);
+
+            // Send filename
+            send(sock, command, strlen(command) + 1, 0);
+
+            pull_files(sock, command);
         } else if (strcasecmp(command, "LEAVE") == 0) {
-            write(sock, "LEAVE", strlen("LEAVE"));
+            header.type = htonl(MSG_LEAVE);
+            header.length = htonl(0);
+            send(sock, &header, sizeof(header), 0);
             printf("Disconnected from server.\n");
             close(sock);
             break;
@@ -76,13 +98,29 @@ int main() {
 
 // Function to list files from the server
 void list_files(int sock) {
-    char buffer[BUFFER_SIZE];
+    MessageHeader header;
+    ResponseMessage response;
     int bytes_read;
 
-    memset(buffer, 0, BUFFER_SIZE);
-    bytes_read = read(sock, buffer, BUFFER_SIZE);
+    // Receive header
+    bytes_read = recv(sock, &header, sizeof(header), 0);
+    if (bytes_read <= 0) {
+        printf("Failed to receive file list header.\n");
+        return;
+    }
+
+    header.type = ntohl(header.type);
+    header.length = ntohl(header.length);
+
+    if (header.type != MSG_RESPONSE) {
+        printf("Invalid response from server.\n");
+        return;
+    }
+
+    // Receive file list
+    bytes_read = recv(sock, response.response, header.length, 0);
     if (bytes_read > 0) {
-        printf("Files on server:\n%s", buffer);
+        printf("Files on server:\n%s", response.response);
     } else {
         printf("Failed to receive file list.\n");
     }
@@ -92,9 +130,10 @@ void list_files(int sock) {
 void diff_files(int sock) {
     DIR *d;
     struct dirent *dir;
-    char filename[BUFFER_SIZE];
-    char md5_hash[MD5_DIGEST_LENGTH * 2 + 1];
-    char server_response[BUFFER_SIZE];
+    char filename[FILENAME_SIZE];
+    char md5_hash[MD5_HASH_SIZE];
+    MessageHeader header;
+    ResponseMessage response;
 
     d = opendir(".");
     if (d) {
@@ -104,16 +143,30 @@ void diff_files(int sock) {
                 strcpy(filename, dir->d_name);
                 compute_file_md5(filename, md5_hash);
 
-                // Send filename and MD5 to server
-                write(sock, filename, BUFFER_SIZE);
-                write(sock, md5_hash, BUFFER_SIZE);
+                // Send filename message
+                header.type = htonl(MSG_FILENAME);
+                header.length = htonl(strlen(filename) + 1); // Include null terminator
+                send(sock, &header, sizeof(header), 0);
+                send(sock, filename, strlen(filename) + 1, 0);
+
+                // Send MD5 hash message
+                header.type = htonl(MSG_MD5);
+                header.length = htonl(strlen(md5_hash) + 1);
+                send(sock, &header, sizeof(header), 0);
+                send(sock, md5_hash, strlen(md5_hash) + 1, 0);
 
                 // Receive server's response
-                read(sock, server_response, BUFFER_SIZE);
-                if (strncmp(server_response, "DIFFERENT", 9) == 0) {
-                    printf("File '%s' is different on the server.\n", filename);
-                } else {
-                    printf("File '%s' is the same on the server.\n", filename);
+                recv(sock, &header, sizeof(header), 0);
+                header.type = ntohl(header.type);
+                header.length = ntohl(header.length);
+
+                if (header.type == MSG_RESPONSE) {
+                    recv(sock, response.response, header.length, 0);
+                    if (strncmp(response.response, "DIFFERENT", 9) == 0) {
+                        printf("File '%s' is different on the server.\n", filename);
+                    } else {
+                        printf("File '%s' is the same on the server.\n", filename);
+                    }
                 }
             }
         }
@@ -122,24 +175,30 @@ void diff_files(int sock) {
 }
 
 // Function to perform PULL operation
-void pull_files(int sock) {
-    char filename[BUFFER_SIZE];
+void pull_files(int sock, const char *filename) {
     FILE *fp;
-    char file_buffer[BUFFER_SIZE];
-    int bytes_read;
+    FileDataMessage file_data;
+    MessageHeader header;
+    int bytes_received;
 
-    printf("Enter the filename to pull: ");
-    fgets(filename, BUFFER_SIZE, stdin);
-    filename[strcspn(filename, "\n")] = 0; // Remove newline
-
-    // Send the filename to the server
-    write(sock, filename, BUFFER_SIZE);
-
-    // Receive response
-    bytes_read = read(sock, file_buffer, BUFFER_SIZE);
-    if (strncmp(file_buffer, "FILE_NOT_FOUND", 14) == 0) {
-        printf("File not found on server.\n");
+    // Receive header
+    bytes_received = recv(sock, &header, sizeof(header), 0);
+    if (bytes_received <= 0) {
+        printf("Failed to receive response from server.\n");
         return;
+    }
+
+    header.type = ntohl(header.type);
+    header.length = ntohl(header.length);
+
+    if (header.type == MSG_RESPONSE) {
+        ResponseMessage response;
+        recv(sock, response.response, header.length, 0);
+
+        if (strncmp(response.response, "FILE_NOT_FOUND", 14) == 0) {
+            printf("File not found on server.\n");
+            return;
+        }
     }
 
     // Create a new file to write the data
@@ -149,11 +208,34 @@ void pull_files(int sock) {
         return;
     }
 
-    // Write the received data into the file
-    do {
-        fwrite(file_buffer, 1, bytes_read, fp);
-        bytes_read = read(sock, file_buffer, BUFFER_SIZE);
-    } while (bytes_read > 0);
+    // Receive file data
+    while (1) {
+        // Receive header
+        bytes_received = recv(sock, &file_data.header, sizeof(file_data.header), 0);
+        if (bytes_received <= 0) {
+            break;
+        }
+
+        file_data.header.type = ntohl(file_data.header.type);
+        file_data.header.length = ntohl(file_data.header.length);
+
+        if (file_data.header.type != MSG_FILE_DATA) {
+            break;
+        }
+
+        // Receive data
+        bytes_received = recv(sock, file_data.data, file_data.header.length, 0);
+        if (bytes_received <= 0) {
+            break;
+        }
+
+        fwrite(file_data.data, 1, bytes_received, fp);
+
+        // If the data received is less than expected, break
+        if (bytes_received < BUFFER_SIZE) {
+            break;
+        }
+    }
 
     fclose(fp);
     printf("File '%s' pulled successfully.\n", filename);
@@ -166,7 +248,7 @@ void compute_file_md5(const char *filename, char *md5_str) {
     FILE *inFile = fopen(filename, "rb");
     MD5_CTX mdContext;
     int bytes;
-    unsigned char data[1024];
+    unsigned char data[BUFFER_SIZE];
 
     if (inFile == NULL) {
         strcpy(md5_str, "");
@@ -174,12 +256,13 @@ void compute_file_md5(const char *filename, char *md5_str) {
     }
 
     MD5_Init(&mdContext);
-    while ((bytes = fread(data, 1, 1024, inFile)) != 0)
+    while ((bytes = fread(data, 1, BUFFER_SIZE, inFile)) != 0)
         MD5_Update(&mdContext, data, bytes);
     MD5_Final(c, &mdContext);
 
     for (i = 0; i < MD5_DIGEST_LENGTH; i++)
         sprintf(&md5_str[i * 2], "%02x", c[i]);
 
+    md5_str[32] = '\0'; // Null-terminate the string
     fclose(inFile);
 }
