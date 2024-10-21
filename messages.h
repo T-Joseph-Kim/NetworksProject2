@@ -19,8 +19,10 @@ typedef enum {
     MSG_FILENAME,
     MSG_MD5,
     MSG_FILE_DATA,
-    MSG_RESPONSE
+    MSG_RESPONSE,
+    MSG_DONE  // New message type to indicate the end of MD5 transfer
 } MessageType;
+
 
 // General message header
 typedef struct {
