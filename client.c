@@ -87,6 +87,29 @@ int main() {
     return 0;
 }
 
+// Function to list files from the server
+void list_files(int sock) {
+    MessageHeader header;
+    header.type = htonl(MSG_LIST);
+    header.length = htonl(0); // No additional data needed for LIST
+
+    // Send the LIST command to the server
+    if (send(sock, &header, sizeof(header), 0) < 0) {
+        perror("Failed to send LIST command");
+        return;
+    }
+
+    // Receive and print file names from the server
+    ResponseMessage response_msg;
+    while (recv(sock, &response_msg, sizeof(response_msg), 0) > 0) {
+        if (ntohl(response_msg.header.type) != MSG_RESPONSE) {
+            break; // Exit if it's not a response message
+        }
+
+        printf("File: %s\n", response_msg.response); // Print the received file name
+    }
+}
+
 // Modify the DIFF function to store missing filenames in cache
 void diff_files(int sock) {
     DIR *dir;
