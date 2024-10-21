@@ -1,18 +1,18 @@
-// server.c
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>       // Provides access to POSIX operating system API
+#include <unistd.h>
 #include <arpa/inet.h>    // Definitions for internet operations
 #include <dirent.h>       // Directory entry operations
 #include <sys/stat.h>     // Data returned by the `stat` function
+#include <pthread.h>      // POSIX threads for multithreading
 #include <openssl/md5.h>  // OpenSSL library for MD5 hashing
 #include "messages.h"     // Header file with message structs
 
 #define PORT 8080
 
 // Function prototypes
+void *handle_client(void *client_socket);
 void handle_list(int client_socket);
 void handle_diff(int client_socket);
 void handle_pull(int client_socket);
@@ -23,6 +23,7 @@ int main() {
     int server_fd, client_socket;
     struct sockaddr_in address;
     int addrlen = sizeof(address);
+    pthread_t thread_id;
 
     // Create socket file descriptor
     if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
@@ -41,42 +42,63 @@ int main() {
     }
 
     // Start listening for connections
-    if (listen(server_fd, 3) < 0) {
+    if (listen(server_fd, 10) < 0) {  // Allow up to 10 pending connections
         perror("Listen failed");
         exit(EXIT_FAILURE);
     }
 
     printf("Server listening on port %d\n", PORT);
 
-    // Accept incoming connections
-    while ((client_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen)) >= 0) {
-        printf("Accepted connection from client\n");
-
-        while (1) {
-            MessageHeader header;
-            int valread = recv(client_socket, &header, sizeof(header), 0);
-            if (valread <= 0) break;
-
-            header.type = ntohl(header.type);
-            header.length = ntohl(header.length);
-
-            if (header.type == MSG_LIST) {
-                handle_list(client_socket);
-            } else if (header.type == MSG_DIFF) {
-                handle_diff(client_socket);
-            } else if (header.type == MSG_PULL) {
-                handle_pull(client_socket);
-            } else if (header.type == MSG_LEAVE) {
-                printf("Client disconnected\n");
-                break;
-            }
+    // Accept incoming connections in a loop
+    while (1) {
+        if ((client_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen)) < 0) {
+            perror("Accept failed");
+            exit(EXIT_FAILURE);
         }
 
-        close(client_socket);
+        // Create a thread to handle each client
+        int *new_sock = malloc(sizeof(int));  // Allocate memory for the client socket
+        *new_sock = client_socket;
+        if (pthread_create(&thread_id, NULL, handle_client, (void*)new_sock) < 0) {
+            perror("Thread creation failed");
+            free(new_sock);  // Clean up if thread creation fails
+            exit(EXIT_FAILURE);
+        }
+
+        printf("Handler assigned to client.\n");
+        pthread_detach(thread_id);  // Detach the thread so it cleans up after itself
     }
 
     close(server_fd);
     return 0;
+}
+
+// Thread function to handle client
+void *handle_client(void *client_socket) {
+    int sock = *(int*)client_socket;
+    free(client_socket);  // Free the socket memory
+    while (1) {
+        MessageHeader header;
+        int valread = recv(sock, &header, sizeof(header), 0);
+        if (valread <= 0) break;
+
+        header.type = ntohl(header.type);
+        header.length = ntohl(header.length);
+
+        if (header.type == MSG_LIST) {
+            handle_list(sock);
+        } else if (header.type == MSG_DIFF) {
+            handle_diff(sock);
+        } else if (header.type == MSG_PULL) {
+            handle_pull(sock);
+        } else if (header.type == MSG_LEAVE) {
+            printf("Client disconnected.\n");
+            break;
+        }
+    }
+
+    close(sock);
+    pthread_exit(NULL);
 }
 
 // Handle LIST command: List all files in the server directory
@@ -94,7 +116,6 @@ void handle_list(int client_socket) {
             ResponseMessage response_msg;
             response_msg.header.type = htonl(MSG_RESPONSE);
             strncpy(response_msg.response, entry->d_name, FILENAME_SIZE);
-
             send(client_socket, &response_msg, sizeof(response_msg), 0);
         }
     }
@@ -102,7 +123,7 @@ void handle_list(int client_socket) {
     closedir(dir);
 }
 
-// Handle DIFF command: Compare client MD5 hashes with server files (ignore filenames)
+// Handle DIFF command: Compare client MD5 hashes with server files
 void handle_diff(int client_socket) {
     char client_md5s[100][MD5_HASH_SIZE];  // Store client MD5s
     int client_file_count = 0;
@@ -164,7 +185,6 @@ void handle_diff(int client_socket) {
 
     closedir(dir);
 }
-
 
 // Handle PULL command: Send requested file to client
 void handle_pull(int client_socket) {
