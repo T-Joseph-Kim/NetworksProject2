@@ -39,8 +39,8 @@ both server and client.
 "Choose a directory (1 for client_files1, 2 for client_files2):"
 5. After selecting the directory, you can use the available commands:
     LIST: Lists the files on the server.
-    DIFF: Compares files in your chosen directory with the server.
-    PULL: Downloads missing or different files from the server.
+    DIFF: Compares files in your chosen directory with the server. If a difference is found, fills local cache.
+    PULL: Downloads missing or different files from the server, based of file names in local cache. Make sure to run DIFF        before PULL to correctly populate cache.
     LEAVE: Disconnects from the server.
 
 ### 4. Multithreading Instructions
