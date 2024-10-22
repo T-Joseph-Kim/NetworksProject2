@@ -1,4 +1,4 @@
-# UFmyMusic
+# UFmyMusic by Joseph Kim and Manas Adepu
 
 This program allows clients to synchronize files with a server by comparing MD5 hashes of files in specified directories. It uses multithreading to handle multiple clients and performs file transfers through socket communication.
 
