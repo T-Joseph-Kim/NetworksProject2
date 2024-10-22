@@ -21,7 +21,9 @@ Please run the program slowly to avoid any errors.
 
 1. Open a terminal and clone or download the source code.
 2. Ensure you have the necessary dependencies installed (GCC, OpenSSL, and `make`).
-3. Run `make` within the root directory (NetworksProject2) to compile both server and client:
+3. Run `make` within the root directory (NetworksProject2) to compile 
+both server and client.
+4. There are many test mp3 files that have the keyword "Same" if files are the same on server and clients (and will not be pulled) even if they have a different file name.
 
 ### 2. Running the Server
 
@@ -62,3 +64,18 @@ LEAVE: Disconnect from the server.
 You can disconnect a client at any time by typing LEAVE. The server will continue to run and accept new connections until manually stopped.
 
 To stop the server, use Ctrl+C in the server's terminal window.
+
+### Project Directory Structure
+
+NetworksProject2/
+├── client/
+│   ├── client.c
+│   ├── client_files1/
+│   ├── client_files2/
+├── server/
+│   ├── server.c
+│   ├── server_files/
+├── messages.h
+├── Makefile
+├── README.md
+└── architecture.pdf
