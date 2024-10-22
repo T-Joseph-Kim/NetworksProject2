@@ -183,12 +183,27 @@ void diff_files(int sock) {
             ResponseMessage response;
             recv(sock, response.response, header.length, 0);
             printf("%s\n", response.response);
-            if (cache_count < MAX_CACHE_FILES) {
-                strncpy(missing_files_cache[cache_count], response.response, FILENAME_SIZE);
-                cache_count++;
+
+            // Check if the file is already in the cache
+            int file_exists_in_cache = 0;
+            for (int i = 0; i < cache_count; i++) {
+                if (strncmp(missing_files_cache[i], response.response, FILENAME_SIZE) == 0) {
+                    file_exists_in_cache = 1;
+                    break;
+                }
+            }
+
+            // If the file is not in the cache, add it
+            if (!file_exists_in_cache) {
+                if (cache_count < MAX_CACHE_FILES) {
+                    strncpy(missing_files_cache[cache_count], response.response, FILENAME_SIZE);
+                    cache_count++;
+                } else {
+                    printf("Cache full, unable to store more missing files.\n");
+                    break;
+                }
             } else {
-                printf("Cache full, unable to store more missing files.\n");
-                break;
+                printf("File '%s' is already in the cache, skipping.\n", response.response);
             }
         }
     }
