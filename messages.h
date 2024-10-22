@@ -3,14 +3,12 @@
 
 #include <stdint.h>
 
-#define BUFFER_SIZE 1024
+#define BUFFER_SIZE 4096
 #define FILENAME_SIZE 256
-#define MD5_HASH_SIZE 33 // 32 chars + null terminator
+#define MD5_HASH_SIZE 33
 
-// Ensure the struct is packed to avoid padding
 #pragma pack(push, 1)
 
-// Enumeration for message types
 typedef enum {
     MSG_LIST = 1,
     MSG_DIFF,
@@ -20,37 +18,33 @@ typedef enum {
     MSG_MD5,
     MSG_FILE_DATA,
     MSG_RESPONSE,
-    MSG_DONE,  // New message type to indicate the end of MD5 transfer
+    MSG_DONE,
     CLIENT_DONE,
-    SERVER_DONE
+    SERVER_DONE,
+    NO_FILE_FOUND,
 } MessageType;
 
 
-// General message header
 typedef struct {
-    uint32_t type;   // MessageType
-    uint32_t length; // Length of the data following the header
+    uint32_t type;
+    uint32_t length;
 } MessageHeader;
 
-// Filename message
 typedef struct {
     MessageHeader header;
     char filename[FILENAME_SIZE];
 } FilenameMessage;
 
-// MD5 hash message
 typedef struct {
     MessageHeader header;
     char md5_hash[MD5_HASH_SIZE];
 } MD5Message;
 
-// File data message
 typedef struct {
     MessageHeader header;
     uint8_t data[BUFFER_SIZE];
 } FileDataMessage;
 
-// Response message
 typedef struct {
     MessageHeader header;
     char response[BUFFER_SIZE];
@@ -58,4 +52,4 @@ typedef struct {
 
 #pragma pack(pop)
 
-#endif // MESSAGES_H
+#endif

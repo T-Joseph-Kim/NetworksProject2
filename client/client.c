@@ -11,8 +11,6 @@
 
 #define PORT 8080
 #define MAX_CACHE_FILES 100
-#define FILENAME_SIZE 256
-#define BUFFER_SIZE 1024
 
 void list_files(int sock);
 void diff_files(int sock, const char *directory);
@@ -147,10 +145,17 @@ void diff_files(int sock, const char *directory) {
                     continue;
                 }
 
+                // Send MD5 hash to the server
                 header.type = htonl(MSG_MD5);
                 header.length = htonl(strlen(md5_hash) + 1);
-                send(sock, &header, sizeof(header), 0);
-                send(sock, md5_hash, strlen(md5_hash) + 1, 0);
+                if (send(sock, &header, sizeof(header), 0) <= 0) {
+                    perror("Error sending MD5 header");
+                    return;
+                }
+                if (send(sock, md5_hash, strlen(md5_hash) + 1, 0) <= 0) {
+                    perror("Error sending MD5 hash");
+                    return;
+                }
             }
         }
         closedir(d);
@@ -161,12 +166,22 @@ void diff_files(int sock, const char *directory) {
 
     header.type = htonl(MSG_DONE);
     header.length = htonl(0);
-    send(sock, &header, sizeof(header), 0);
+    if (send(sock, &header, sizeof(header), 0) <= 0) {
+        perror("Error sending MSG_DONE");
+        return;
+    }
 
     printf("Files on the server but not on the client:\n");
     while (1) {
         int bytes_read = recv(sock, &header, sizeof(header), 0);
-        if (bytes_read <= 0) break;
+        if (bytes_read <= 0) {
+            if (bytes_read == 0) {
+                printf("Server closed the connection.\n");
+            } else {
+                perror("Error receiving header");
+            }
+            break;
+        }
 
         header.type = ntohl(header.type);
         header.length = ntohl(header.length);
@@ -178,7 +193,27 @@ void diff_files(int sock, const char *directory) {
 
         if (header.type == MSG_RESPONSE) {
             ResponseMessage response;
-            recv(sock, response.response, header.length, 0);
+            memset(&response, 0, sizeof(response));
+
+            if (header.length > sizeof(response.response) - 1) {
+                fprintf(stderr, "Received data length exceeds buffer size.\n");
+                char discard_buffer[header.length];
+                recv(sock, discard_buffer, header.length, 0);
+                continue;
+            }
+
+            bytes_read = recv(sock, response.response, header.length, 0);
+            if (bytes_read <= 0) {
+                perror("Error receiving response");
+                break;
+            }
+
+            if (bytes_read < sizeof(response.response)) {
+                response.response[bytes_read] = '\0';
+            } else {
+                response.response[sizeof(response.response) - 1] = '\0';
+            }
+
             printf("%s\n", response.response);
 
             int file_exists_in_cache = 0;
@@ -191,7 +226,8 @@ void diff_files(int sock, const char *directory) {
 
             if (!file_exists_in_cache) {
                 if (cache_count < MAX_CACHE_FILES) {
-                    strncpy(missing_files_cache[cache_count], response.response, FILENAME_SIZE);
+                    strncpy(missing_files_cache[cache_count], response.response, FILENAME_SIZE - 1);
+                    missing_files_cache[cache_count][FILENAME_SIZE - 1] = '\0';  // Ensure null-termination
                     cache_count++;
                 } else {
                     printf("Cache full, unable to store more missing files.\n");
@@ -203,6 +239,7 @@ void diff_files(int sock, const char *directory) {
         }
     }
 }
+
 
 void pull_files(int sock, const char *directory) {
     for (int i = 0; i < cache_count; i++) {

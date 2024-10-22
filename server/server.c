@@ -25,10 +25,12 @@ int main() {
     struct sockaddr_in address;
     int addrlen = sizeof(address);
     pthread_t thread_id;
+
     if (chdir("server") != 0) {
         perror("Failed to change directory to server");
         exit(EXIT_FAILURE);
     }
+
     if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
         perror("Socket failed");
         exit(EXIT_FAILURE);
@@ -38,16 +40,19 @@ int main() {
     address.sin_addr.s_addr = INADDR_ANY;
     address.sin_port = htons(PORT);
 
-    memset(address.sin_zero, '\0', sizeof address.sin_zero);
+    memset(address.sin_zero, '\0', sizeof(address.sin_zero));
 
     if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
         perror("Bind failed");
+        close(server_fd);
         exit(EXIT_FAILURE);
     }
+
     printf("Server started on port %d\n", PORT);
 
     if (listen(server_fd, MAX_CLIENTS) < 0) {
-        perror("Listen");
+        perror("Listen failed");
+        close(server_fd);
         exit(EXIT_FAILURE);
     }
 
@@ -56,23 +61,34 @@ int main() {
     while ((new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t *)&addrlen)) >= 0) {
         printf("Connection accepted: socket %d\n", new_socket);
 
-        client_sock = malloc(1);
+        client_sock = malloc(sizeof(int));
+        if (client_sock == NULL) {
+            perror("Failed to allocate memory for client socket");
+            close(new_socket);
+            continue;
+        }
+
         *client_sock = new_socket;
 
         if (pthread_create(&thread_id, NULL, handle_client, (void *)client_sock) < 0) {
             perror("Could not create thread");
             free(client_sock);
+            close(new_socket);
             continue;
         }
+
+        pthread_detach(thread_id);
 
         printf("Handler assigned for socket %d\n", new_socket);
     }
 
     if (new_socket < 0) {
-        perror("Accept");
+        perror("Accept failed");
+        close(server_fd);
         exit(EXIT_FAILURE);
     }
 
+    close(server_fd);
     return 0;
 }
 
@@ -128,7 +144,7 @@ void send_file_list(int client_socket) {
     if (d) {
         while ((dir = readdir(d)) != NULL) {
             if (dir->d_type == DT_REG) {
-                strcat(file_list, dir->d_name);
+                strncat(file_list, dir->d_name, BUFFER_SIZE - strlen(file_list) - 2);
                 strcat(file_list, "\n");
             }
         }
@@ -177,7 +193,7 @@ void handle_diff(int client_socket) {
         while ((dir = readdir(d)) != NULL) {
             if (dir->d_type == DT_REG) {
 
-                char fullpath[FILENAME_SIZE];
+                char fullpath[FILENAME_SIZE * 2];
                 snprintf(fullpath, FILENAME_SIZE, "server_files/%s", dir->d_name);
                 compute_file_md5(fullpath, server_md5);
 
