@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#define BUFFER_SIZE 1024
+#define BUFFER_SIZE 4096
 #define FILENAME_SIZE 256
 #define MD5_HASH_SIZE 33 // 32 chars + null terminator
 
