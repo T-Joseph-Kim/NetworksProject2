@@ -2,6 +2,8 @@
 
 This program allows clients to synchronize files with a server by comparing MD5 hashes of files in specified directories. It uses multithreading to handle multiple clients and performs file transfers through socket communication.
 
+Please run the program slowly to avoid any errors.
+
 ## Features
 
 - **LIST**: Displays the list of files available on the server.
@@ -23,13 +25,13 @@ This program allows clients to synchronize files with a server by comparing MD5 
 
 ### 2. Running the Server
 
-1. Change to the server directory: `cd server`
+1. Stay in root directory (NetworksProject2)
 2. Run the server: `./server/server`
 
 ### 3. Running the Client
 
 1. Open a new terminal window (or tab) for the client.
-2. Change to the client directory: `cd client`
+2. Stay in root directory (NetworksProject2)
 3. Run the client: `./client/client`
 4. Upon starting the client, you will be prompted to select a directory:
 "Choose a directory (1 for client_files1, 2 for client_files2):"
