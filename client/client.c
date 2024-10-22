@@ -12,12 +12,18 @@
 #include "../messages.h"     // Header file with message structs
 
 #define PORT 8080
+#define MAX_CACHE_FILES 100  // Define a reasonable size for the cache
+
 
 // Function prototypes
 void list_files(int sock);
 void diff_files(int sock);
-void pull_files(int sock, const char *filename);
+void pull_files(int sock);
 void compute_file_md5(const char *filename, char *md5_str);
+
+// Cache for storing missing filenames
+char missing_files_cache[MAX_CACHE_FILES][FILENAME_SIZE];
+int cache_count = 0;
 
 int main() {
     int sock = 0;
@@ -71,19 +77,7 @@ int main() {
             send(sock, &header, sizeof(header), 0);
             diff_files(sock);
         } else if (strcasecmp(command, "PULL") == 0) {
-            printf("Enter the filename to pull: ");
-            fgets(command, BUFFER_SIZE, stdin);
-            command[strcspn(command, "\n")] = 0; // Remove newline
-
-            // Send PULL command header
-            header.type = htonl(MSG_PULL);
-            header.length = htonl(strlen(command) + 1); // Include null terminator
-            send(sock, &header, sizeof(header), 0);
-
-            // Send filename
-            send(sock, command, strlen(command) + 1, 0);
-
-            pull_files(sock, command);
+            pull_files(sock);
         } else if (strcasecmp(command, "LEAVE") == 0) {
             header.type = htonl(MSG_LEAVE);
             header.length = htonl(0);
@@ -189,76 +183,82 @@ void diff_files(int sock) {
             ResponseMessage response;
             recv(sock, response.response, header.length, 0);
             printf("%s\n", response.response);
+            if (cache_count < MAX_CACHE_FILES) {
+                strncpy(missing_files_cache[cache_count], response.response, FILENAME_SIZE);
+                cache_count++;
+            } else {
+                printf("Cache full, unable to store more missing files.\n");
+                break;
+            }
         }
     }
 }
 
 
-// Function to perform PULL operation
-void pull_files(int sock, const char *filename) {
-    FILE *fp;
-    FileDataMessage file_data;
-    MessageHeader header;
-    int bytes_received;
+// Modify the PULL function to request all missing files from the cache
+void pull_files(int sock) {
+    for (int i = 0; i < cache_count; i++) {
+        const char *filename = missing_files_cache[i];
+        
+        // Send PULL command header
+        MessageHeader header;
+        header.type = htonl(MSG_PULL);
+        header.length = htonl(strlen(filename) + 1); // Include null terminator
+        send(sock, &header, sizeof(header), 0);
+        
+        // Send filename
+        send(sock, filename, strlen(filename) + 1, 0);
 
-    // Receive header
-    bytes_received = recv(sock, &header, sizeof(header), 0);
-    if (bytes_received <= 0) {
-        printf("Failed to receive response from server.\n");
-        return;
+        // Buffer to hold the path to the file in the client_files directory
+        char filepath[FILENAME_SIZE + 50];  // Add some extra space for the directory path
+
+        // Assuming client_files is a subdirectory in the current working directory
+        snprintf(filepath, sizeof(filepath), "client_files/%s", filename);
+
+        // Open the file in write-binary mode (wb) in the client_files directory
+        FILE *fp = fopen(filepath, "wb");
+        if (fp == NULL) {
+            printf("Failed to create file '%s'.\n", filename);
+            continue;
+        }
+
+        FileDataMessage file_data;
+        int bytes_received;
+        while (1) {
+            // Receive header
+            bytes_received = recv(sock, &file_data.header, sizeof(file_data.header), 0);
+            if (bytes_received <= 0) {
+                printf("Connection lost or error while receiving file data.\n");
+                break;
+            }
+            
+            file_data.header.type = ntohl(file_data.header.type);
+            file_data.header.length = ntohl(file_data.header.length);
+            
+            if (file_data.header.type == MSG_DONE) {
+                printf("File transfer completed for '%s'.\n", filename);
+                break;
+            } else if (file_data.header.type != MSG_FILE_DATA) {
+                printf("Unexpected message type received.\n");
+                break;
+            }
+            
+            // Receive file data
+            bytes_received = recv(sock, file_data.data, file_data.header.length, 0);
+            if (bytes_received <= 0) {
+                printf("Error receiving file data for '%s'.\n", filename);
+                break;
+            }
+            
+            fwrite(file_data.data, 1, bytes_received, fp);
+        }
+
+        fclose(fp);
+        printf("File '%s' pulled successfully.\n", filename);
     }
 
-    header.type = ntohl(header.type);
-    header.length = ntohl(header.length);
-
-    if (header.type == MSG_RESPONSE) {
-        ResponseMessage response;
-        recv(sock, response.response, header.length, 0);
-
-        if (strncmp(response.response, "FILE_NOT_FOUND", 14) == 0) {
-            printf("File not found on server.\n");
-            return;
-        }
-    }
-
-    // Create a new file to write the data
-    fp = fopen(filename, "wb");
-    if (fp == NULL) {
-        printf("Failed to create file '%s'.\n", filename);
-        return;
-    }
-
-    // Receive file data
-    while (1) {
-        // Receive header
-        bytes_received = recv(sock, &file_data.header, sizeof(file_data.header), 0);
-        if (bytes_received <= 0) {
-            break;
-        }
-
-        file_data.header.type = ntohl(file_data.header.type);
-        file_data.header.length = ntohl(file_data.header.length);
-
-        if (file_data.header.type != MSG_FILE_DATA) {
-            break;
-        }
-
-        // Receive data
-        bytes_received = recv(sock, file_data.data, file_data.header.length, 0);
-        if (bytes_received <= 0) {
-            break;
-        }
-
-        fwrite(file_data.data, 1, bytes_received, fp);
-
-        // If the data received is less than expected, break
-        if (bytes_received < BUFFER_SIZE) {
-            break;
-        }
-    }
-
-    fclose(fp);
-    printf("File '%s' pulled successfully.\n", filename);
+    // Clear cache after pulling files
+    cache_count = 0;
 }
 
 // Function to compute MD5 hash of a file

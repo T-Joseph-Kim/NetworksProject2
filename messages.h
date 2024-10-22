@@ -20,7 +20,9 @@ typedef enum {
     MSG_MD5,
     MSG_FILE_DATA,
     MSG_RESPONSE,
-    MSG_DONE  // New message type to indicate the end of MD5 transfer
+    MSG_DONE,  // New message type to indicate the end of MD5 transfer
+    CLIENT_DONE,
+    SERVER_DONE
 } MessageType;
 
 

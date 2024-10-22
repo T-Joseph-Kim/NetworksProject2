@@ -21,6 +21,7 @@ void send_file_list(int client_socket);
 void handle_diff(int client_socket);
 void handle_pull(int client_socket);
 void compute_file_md5(const char *filename, char *md5_str);
+void handle_pull_request(int client_socket, const char *filename);
 
 int main() {
     int server_fd, new_socket, *client_sock;
@@ -236,45 +237,14 @@ void handle_diff(int client_socket) {
     send(client_socket, &header, sizeof(header), 0);
 }
 
-// Function to handle the PULL command
+// Handle PULL command: Send requested file to client
 void handle_pull(int client_socket) {
+    // Receive the filename from the client
     char filename[FILENAME_SIZE];
-    FILE *fp;
-    FileDataMessage file_data;
-    MessageHeader header;
-    ResponseMessage response;
+    recv(client_socket, filename, FILENAME_SIZE, 0);
 
-    // Receive filename
-    recv(client_socket, filename, header.length, 0);
-
-    fp = fopen(filename, "rb");
-    if (fp == NULL) {
-        // Send FILE_NOT_FOUND response
-        response.header.type = htonl(MSG_RESPONSE);
-        strcpy(response.response, "FILE_NOT_FOUND");
-        response.header.length = htonl(strlen(response.response) + 1);
-        send(client_socket, &response.header, sizeof(response.header), 0);
-        send(client_socket, response.response, strlen(response.response) + 1, 0);
-        return;
-    } else {
-        // Send OK response (empty response)
-        response.header.type = htonl(MSG_RESPONSE);
-        response.response[0] = '\0';
-        response.header.length = htonl(1); // Null terminator
-        send(client_socket, &response.header, sizeof(response.header), 0);
-        send(client_socket, response.response, 1, 0);
-    }
-
-    // Send file data messages
-    while ((file_data.header.length = fread(file_data.data, 1, BUFFER_SIZE, fp)) > 0) {
-        file_data.header.type = htonl(MSG_FILE_DATA);
-        uint32_t length = htonl(file_data.header.length);
-        send(client_socket, &file_data.header.type, sizeof(file_data.header.type), 0);
-        send(client_socket, &length, sizeof(length), 0);
-        send(client_socket, file_data.data, file_data.header.length, 0);
-    }
-
-    fclose(fp);
+    // Send the file to the client
+    handle_pull_request(client_socket, filename);
 }
 
 // Function to compute MD5 hash of a file
@@ -301,4 +271,44 @@ void compute_file_md5(const char *filename, char *md5_str) {
 
     md5_str[32] = '\0'; // Null-terminate the string
     fclose(inFile);
+}
+
+// Function to handle the PULL request (send file to client)
+void handle_pull_request(int client_socket, const char *filename) {
+    // Buffer to hold the path to the file in the server_files directory
+    char filepath[FILENAME_SIZE + 50];  // Add some extra space for the directory path
+
+    // Assuming server_files is a subdirectory in the current working directory
+    snprintf(filepath, sizeof(filepath), "server_files/%s", filename);
+
+    // Open the file in read-binary mode (rb)
+    FILE *fp = fopen(filepath, "rb");
+    if (fp == NULL) {
+        printf("File '%s' not found on server.\n", filename);
+        // You might want to send an error response to the client if the file isn't found
+        return;
+    }
+
+    // Read and send the file in chunks
+    FileDataMessage file_data;
+    int bytes_read;
+    while ((bytes_read = fread(file_data.data, 1, BUFFER_SIZE, fp)) > 0) {
+        file_data.header.type = htonl(MSG_FILE_DATA);
+        file_data.header.length = htonl(bytes_read);
+
+        // Send the header
+        send(client_socket, &file_data.header, sizeof(file_data.header), 0);
+
+        // Send the file data
+        send(client_socket, file_data.data, bytes_read, 0);
+    }
+
+    // After the file is sent, send MSG_DONE to indicate the end of the file transfer
+    MessageHeader done_msg;
+    done_msg.type = htonl(MSG_DONE);
+    done_msg.length = htonl(0);
+    send(client_socket, &done_msg, sizeof(done_msg), 0);
+
+    fclose(fp);
+    printf("File '%s' sent successfully.\n", filename);
 }
