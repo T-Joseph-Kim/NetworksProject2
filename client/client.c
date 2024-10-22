@@ -3,22 +3,23 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>       // Provides access to POSIX operating system API
-#include <arpa/inet.h>    // Definitions for internet operations
-#include <dirent.h>       // Directory entry operations
-#include <sys/stat.h>     // Data returned by the `stat` function
-#include <openssl/md5.h>  // OpenSSL library for MD5 hashing
-#include <stdint.h>       // For fixed-size integer types
-#include "../messages.h"     // Header file with message structs
+#include <unistd.h>       // POSIX API
+#include <arpa/inet.h>    // Internet operations
+#include <dirent.h>       // Directory operations
+#include <sys/stat.h>     // File status
+#include <openssl/md5.h>  // MD5 hashing
+#include <stdint.h>       // Fixed-size integers
+#include "../messages.h"  // Message structs
 
 #define PORT 8080
-#define MAX_CACHE_FILES 100  // Define a reasonable size for the cache
-
+#define MAX_CACHE_FILES 100  // Cache size
+#define FILENAME_SIZE 256
+#define BUFFER_SIZE 1024
 
 // Function prototypes
 void list_files(int sock);
-void diff_files(int sock);
-void pull_files(int sock);
+void diff_files(int sock, const char *directory);
+void pull_files(int sock, const char *directory);
 void compute_file_md5(const char *filename, char *md5_str);
 
 // Cache for storing missing filenames
@@ -29,10 +30,29 @@ int main() {
     int sock = 0;
     struct sockaddr_in serv_addr;
     char command[BUFFER_SIZE];
+    char chosen_directory[FILENAME_SIZE];
+
+    // Prompt the user to choose between client_files1 or client_files2
+    printf("Choose a directory (1 for client_files1, 2 for client_files2): ");
+    int choice;
+    scanf("%d", &choice);
+    getchar();  // Consume the newline character left by scanf
+
+    // Set the directory based on user input
+    if (choice == 1) {
+        strcpy(chosen_directory, "client_files1");
+    } else if (choice == 2) {
+        strcpy(chosen_directory, "client_files2");
+    } else {
+        printf("Invalid choice. Exiting...\n");
+        return -1;
+    }
+
     if (chdir("client") != 0) {
-        perror("Failed to change directory to server");
+        perror("Failed to change directory to client");
         exit(EXIT_FAILURE);
     }
+
     // Create socket
     if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
         perror("Socket creation error");
@@ -75,9 +95,9 @@ int main() {
             header.type = htonl(MSG_DIFF);
             header.length = htonl(0);
             send(sock, &header, sizeof(header), 0);
-            diff_files(sock);
+            diff_files(sock, chosen_directory);
         } else if (strcasecmp(command, "PULL") == 0) {
-            pull_files(sock);
+            pull_files(sock, chosen_directory);
         } else if (strcasecmp(command, "LEAVE") == 0) {
             header.type = htonl(MSG_LEAVE);
             header.length = htonl(0);
@@ -123,23 +143,21 @@ void list_files(int sock) {
     }
 }
 
-// client.c
-
 // Function to perform DIFF operation
-void diff_files(int sock) {
+void diff_files(int sock, const char *directory) {
     DIR *d;
-    struct dirent *dir;
+    struct dirent *dir_entry;
     char md5_hash[MD5_HASH_SIZE];
     MessageHeader header;
 
-    d = opendir("client_files");
+    d = opendir(directory);
     if (d) {
         // For each file in the client's directory
-        while ((dir = readdir(d)) != NULL) {
-            if (dir->d_type == DT_REG) {  // Regular files only
+        while ((dir_entry = readdir(d)) != NULL) {
+            if (dir_entry->d_type == DT_REG) {  // Regular files only
                 // Compute MD5 of the client file
-                char fullpath[FILENAME_SIZE];
-                snprintf(fullpath, FILENAME_SIZE, "client_files/%s", dir->d_name);
+                char fullpath[FILENAME_SIZE * 2]; // Increase buffer size
+                snprintf(fullpath, sizeof(fullpath), "%s/%s", directory, dir_entry->d_name);
                 compute_file_md5(fullpath, md5_hash);
 
                 // Skip files that don't exist or have an empty MD5 hash
@@ -155,6 +173,9 @@ void diff_files(int sock) {
             }
         }
         closedir(d);
+    } else {
+        printf("Failed to open directory '%s'\n", directory);
+        return;
     }
 
     // Send an end message to signal the end of file transmission
@@ -209,31 +230,28 @@ void diff_files(int sock) {
     }
 }
 
-
 // Modify the PULL function to request all missing files from the cache
-void pull_files(int sock) {
+void pull_files(int sock, const char *directory) {
     for (int i = 0; i < cache_count; i++) {
         const char *filename = missing_files_cache[i];
-        
+
         // Send PULL command header
         MessageHeader header;
         header.type = htonl(MSG_PULL);
         header.length = htonl(strlen(filename) + 1); // Include null terminator
         send(sock, &header, sizeof(header), 0);
-        
+
         // Send filename
         send(sock, filename, strlen(filename) + 1, 0);
 
-        // Buffer to hold the path to the file in the client_files directory
-        char filepath[FILENAME_SIZE + 50];  // Add some extra space for the directory path
+        // Buffer to hold the path to the file in the chosen directory
+        char filepath[FILENAME_SIZE * 2];  // Increase buffer size
+        snprintf(filepath, sizeof(filepath), "%s/%s", directory, filename);
 
-        // Assuming client_files is a subdirectory in the current working directory
-        snprintf(filepath, sizeof(filepath), "client_files/%s", filename);
-
-        // Open the file in write-binary mode (wb) in the client_files directory
+        // Open the file in write-binary mode (wb) in the chosen directory
         FILE *fp = fopen(filepath, "wb");
         if (fp == NULL) {
-            printf("Failed to create file '%s'.\n", filename);
+            printf("Failed to create file '%s'.\n", filepath);
             continue;
         }
 
@@ -246,10 +264,10 @@ void pull_files(int sock) {
                 printf("Connection lost or error while receiving file data.\n");
                 break;
             }
-            
+
             file_data.header.type = ntohl(file_data.header.type);
             file_data.header.length = ntohl(file_data.header.length);
-            
+
             if (file_data.header.type == MSG_DONE) {
                 printf("File transfer completed for '%s'.\n", filename);
                 break;
@@ -257,14 +275,14 @@ void pull_files(int sock) {
                 printf("Unexpected message type received.\n");
                 break;
             }
-            
+
             // Receive file data
             bytes_received = recv(sock, file_data.data, file_data.header.length, 0);
             if (bytes_received <= 0) {
                 printf("Error receiving file data for '%s'.\n", filename);
                 break;
             }
-            
+
             fwrite(file_data.data, 1, bytes_received, fp);
         }
 
@@ -304,4 +322,3 @@ void compute_file_md5(const char *filename, char *md5_str) {
     md5_str[32] = '\0';  // Null-terminate the string
     fclose(inFile);
 }
-
