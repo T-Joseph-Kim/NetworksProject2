@@ -38,10 +38,10 @@ both server and client.
 4. Upon starting the client, you will be prompted to select a directory:
 "Choose a directory (1 for client_files1, 2 for client_files2):"
 5. After selecting the directory, you can use the available commands:
-LIST: Lists the files on the server.
-DIFF: Compares files in your chosen directory with the server. If a difference is found, fills local cache.
-PULL: Downloads missing or different files from the server, based of file names in local cache. Make sure to run DIFF before PULL to correctly populate cache.
-LEAVE: Disconnects from the server.
+- LIST: Lists the files on the server.
+- DIFF: Compares files in your chosen directory with the server. If a difference is found, fills local cache.
+- PULL: Downloads missing or different files from the server, based of file names in local cache. Make sure to run DIFF before PULL to correctly populate cache.
+- LEAVE: Disconnects from the server.
 
 ### 4. Multithreading Instructions
 This program supports multithreading, allowing multiple clients to connect to the server concurrently. However, when running multiple clients, ensure each client joins a directory before starting another client. This prevents potential issues when both clients try to select directories at the same time.
